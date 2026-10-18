@@ -1,0 +1,62 @@
+================================================================================
+HW/SW Co-design Final Project (00460882) - Benchmark: raytrace
+================================================================================
+
+1. OVERVIEW
+--------------------------------------------------------------------------------
+raytrace is a pure-Python raytracer benchmark executing 3D scene rendering via
+mathematical ray-geometry intersections, vector dot/cross products, and shading.
+It renders an image by casting primary and secondary rays across reflective surfaces
+and spherical objects.
+
+2. PROFILING & BOTTLENECK ANALYSIS
+--------------------------------------------------------------------------------
+Environment: QEMU guest on tangerine server, measured using:
+`perf record -F 999 -g -- python3 bm_raytrace/run_benchmark.py --values 1 -w 0`
+
+Key Bottlenecks identified:
+- _PyEval_EvalFrameDefault (~35.6% self): CPython bytecode execution overhead.
+- Object Allocation Churn: Classes (Vector, Point, Ray, Sphere) lacked __slots__,
+  triggering dynamic dict (__dict__) allocation, deallocation, and cache misses.
+- Redundant Function Calls & Type Checks: mustBeVector() and isPoint() called
+  millions of times inside the inner math loop.
+- Inefficient Intersection Logic: Sphere.intersectionTime repeatedly built
+  intermediate Vector instances and executed method calls per ray-sphere pair.
+
+3. SOFTWARE OPTIMIZATION
+--------------------------------------------------------------------------------
+Optimizations applied (opt_raytrace/run_benchmark.py):
+- OPT-1 (__slots__ allocation elimination): Added __slots__ to Vector, Point,
+  and Ray classes, eliminating per-object dict overhead.
+- OPT-2 (Assertion Removal): Stripped redundant runtime type checks from hot
+  vector arithmetic (dot, __sub__, cross).
+- OPT-3 (Inlined Intersection Math): Inlined vector subtraction and dot products
+  directly inside Sphere.intersectionTime using local scalar floats.
+
+Results (pyperf compare_to):
+  Mean +- std dev: [raytrace_orig] 17.5 sec +- 2.8 sec
+                -> [raytrace_opt]  11.6 sec +- 2.3 sec: 1.52x faster (~33.7% reduction)
+
+4. HARDWARE ACCELERATION PROPOSAL
+--------------------------------------------------------------------------------
+Component: Ray-Sphere Intersection Engine (hardware_raytrace/ray_sphere_intersect.sv)
+Accompanied by: Non-Restoring Q16.16 Square Root Unit (hardware_raytrace/q16_sqrt.sv)
+
+- Datapath & Architecture:
+  Fully integer/fixed-point Q16.16 pipeline receiving sphere center (cx, cy, cz),
+  radius, ray origin (px, py, pz), and direction (dx, dy, dz).
+  Calculates cp = c - p, v = cp . d, cp_dot_cp = cp . cp, discriminant = r^2 - (cp.cp - v^2),
+  and distance t = v - sqrt(discriminant).
+- Verification:
+  Simulated via Icarus Verilog (`iverilog -g2012`), passed verification:
+  `TEST 1 PASSED: Direct Hit at t = 8.000000`, `TEST 2 PASSED: Correctly detected Miss`.
+- Hardware/Software Interface:
+  Memory-Mapped I/O (MMIO) with AXI-Stream valid/ready handshakes.
+
+Amdahl's Law Speedup Estimation:
+- Evaluated accelerated fraction f: Ray-sphere intersection and vector dot calculations
+  account for ~42.0% of execution time (f = 0.42).
+- Estimated component speedup: At 400 MHz in FPGA/ASIC, hardware evaluates an intersection
+  in ~28 clock cycles (~70 ns) vs ~12 us in Python interpreter (s ~ 170x).
+- Theoretical Overall System Speedup:
+  Speedup = 1 / ((1 - f) + f / s) = 1 / ((1 - 0.42) + 0.42 / 170) = 1.71x

@@ -1,0 +1,1 @@
+Mean +- std dev: [float_orig] 3.17 sec +- 0.37 sec -> [float_opt] 2.95 sec +- 0.20 sec: 1.08x faster

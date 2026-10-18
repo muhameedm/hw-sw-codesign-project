@@ -1,0 +1,28 @@
+================================================================================
+HW/SW Co-design Final Project (00460882) - Benchmark: float
+================================================================================
+
+1. OVERVIEW
+--------------------------------------------------------------------------------
+float is a floating-point computation benchmark originally used by the Factor
+project. It generates 100,000 3D Point objects via trigonometric functions
+(sin, cos, sqrt), normalizes their coordinates, and tracks global maximal values.
+
+2. PROFILING & BOTTLENECK ANALYSIS
+--------------------------------------------------------------------------------
+Hotspots identified via perf:
+- Repeated method invocation overhead in `maximize()` calling `Point.maximize()`
+  100,000 times sequentially.
+- Overhead in Python attribute retrieval (`self.x`, `self.y`, `self.z`) across
+  subscript iterations.
+
+3. SOFTWARE OPTIMIZATION
+--------------------------------------------------------------------------------
+Optimization applied:
+- Scalar Unrolling & Local Variable Caching: Flattened `maximize()` loop to use
+  local scalar registers (mx, my, mz) avoiding method dispatch and repeated
+  attribute dereferencing inside the loop.
+
+Results (pyperf compare_to):
+  Mean +- std dev: [float_orig] 3.17 sec +- 0.37 sec
+                -> [float_opt]  2.95 sec +- 0.20 sec: 1.08x faster (~7.4% reduction)

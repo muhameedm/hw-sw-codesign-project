@@ -1,0 +1,1 @@
+Mean +- std dev: [raytrace_orig] 17.5 sec +- 2.8 sec -> [raytrace_opt] 11.6 sec +- 2.3 sec: 1.52x faster

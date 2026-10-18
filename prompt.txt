@@ -1,0 +1,15 @@
+HW/SW Co-Design (00460882) - AI Interaction Log
+Benchmarks: raytrace & float
+
+Phase 1: Profiling and Bottleneck Identification
+- Used perf record and flame graphs to analyze CPython bytecode overhead and memory allocation patterns.
+- Identified object churn in raytrace (missing __slots__) and function dispatch overhead in float (maximize).
+
+Phase 2: Software Optimization
+- Designed and applied __slots__ and inlined scalar operations to eliminate dynamic dictionaries.
+- Validated performance improvement using pyperf compare_to (1.52x for raytrace, 1.08x for float).
+
+Phase 3: Hardware Acceleration & Architecture
+- Formulated fixed-point Q16.16 ray-sphere intersection datapath with non-restoring pipelined square root.
+- Implemented and verified synthesizable SystemVerilog models (q16_sqrt.sv, ray_sphere_intersect.sv, tb_ray_sphere.sv).
+- Computed theoretical system speedup bounds using Amdahl's Law.
