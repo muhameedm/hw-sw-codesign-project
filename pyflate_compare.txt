@@ -1,0 +1,1 @@
+Mean +- std dev: [pyflate_orig] 18.5 sec +- 1.6 sec -> [pyflate_opt] 5.56 sec +- 1.20 sec: 3.32x faster

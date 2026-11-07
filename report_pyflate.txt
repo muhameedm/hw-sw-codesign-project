@@ -1,0 +1,97 @@
+================================================================================
+HW/SW Co-design Final Project (00460882) - Benchmark: pyflate
+================================================================================
+
+1. OVERVIEW
+--------------------------------------------------------------------------------
+pyflate is a pure-Python gzip/bzip2 decompressor from pyperformance. The benchmark
+decodes interpreter.tar.bz2 (67,562 bytes) and checks an MD5 of the output on every
+run.
+
+Libraries: hashlib, struct and pyperf. The decoder itself uses no compression
+library.
+Data structures: RBitfield (bit reader), HuffmanTable (list of HuffmanLength
+objects), and Python lists and bytes.
+Algorithm for bzip2: Huffman decoding, move-to-front, run expansion, reverse
+Burrows-Wheeler transform, then a final run-length step.
+
+2. PROFILING & BOTTLENECK ANALYSIS
+--------------------------------------------------------------------------------
+Environment: QEMU (TCG) guest on the tangerine server, Python 3.10.
+Data: pyflate_orig_perf_report.txt, pyflate_orig.svg, pyflate_opt.svg.
+
+Native hotspots from perf (self time, original code):
+  _PyEval_EvalFrameDefault  39.60%   bytecode interpreter loop
+  PyObject_RichCompare       2.82%   comparisons
+  _PyFunction_Vectorcall     2.23%   Python calls
+  binary_op1                 2.17%   generic arithmetic
+  list_dealloc               2.16%   freeing lists
+  object_dealloc             2.12%   freeing objects
+  _PyObject_GetMethod        2.06%   method lookup
+  list_ass_slice             1.92%   list slice assignment
+  list_slice                 1.76%   list slicing
+
+Limitation: perf shows CPython's C functions, not Python names. The mapping below
+comes from reading the source.
+
+Bottlenecks:
+- HuffmanTable.find_next_symbol scans the code table for every decoded symbol.
+  This matches the comparison and call costs.
+- move_to_front builds a new list per symbol. This matches the list slice and
+  deallocation costs.
+- RBitfield reads one byte at a time through Python method calls.
+- The final run-length loop appends one bytes object per output byte.
+
+3. SOFTWARE OPTIMIZATION
+--------------------------------------------------------------------------------
+Applied in opt_pyflate/run_benchmark.py. The decoder stays in pure Python and does
+not call the bz2 module.
+- OPT-1: table-driven Huffman decoding. HuffmanTable.build_decoder creates a list
+  indexed by the next 10 bits. Each entry stores (symbol << 5) | code length. Codes
+  longer than 10 bits use one dict per length.
+- OPT-2: the bit reader refills 8 bytes at a time, and the main loop keeps the bit
+  state in local variables.
+- OPT-3: move_to_front uses pop and insert instead of building a new list.
+- OPT-4: the final run-length step finds runs with a compiled regular expression
+  and copies the bytes between runs as whole slices.
+
+Correctness: the benchmark's MD5 check passes. The optimized decoder also matched
+Python's bz2 module on 14 generated cases, covering random data, long runs, text,
+zeros, skewed data, and multi-block files.
+
+4. PERFORMANCE COMPARISON
+--------------------------------------------------------------------------------
+pyperf compare_to (pyflate_compare.txt), QEMU guest, 60 values each:
+  [pyflate_orig] 18.5 sec +- 1.6 sec
+  -> [pyflate_opt] 5.56 sec +- 1.20 sec: 3.32x faster (69.9% less time)
+
+perf samples: 482,545 -> 184,547 (62% fewer).
+
+Hardware counters. The VM does not support them, so these were measured directly
+on the tangerine host (Intel Xeon E5-2690 v4, Python 3.10), pinned to one core:
+perf stat -r 5, 3 decode loops per run (perf_stat/).
+
+  Counter            Original     Optimized    Change
+  Instructions       21.42 G      7.05 G       3.04x fewer
+  Cycles             8.06 G       2.64 G       3.06x fewer
+  IPC                2.66         2.67         same
+  Cache-miss rate    4.68%        0.95%        lower (noisy, see below)
+  Branch-miss rate   0.34%        0.48%        higher
+
+IPC did not change, so the gain comes from executing fewer instructions rather
+than from running them more efficiently. The cache-miss count is small and varied
+by up to 46% between runs for the optimized version, so that rate is only a rough
+indication.
+
+5. HARDWARE ACCELERATION PROPOSAL
+--------------------------------------------------------------------------------
+No accelerator is proposed for this benchmark. The hardware proposal targets
+raytrace (see report_raytrace.txt).
+
+6. CONCLUSION
+--------------------------------------------------------------------------------
+Replacing the Huffman scan and the byte-at-a-time loops made pyflate 3.32x faster
+while remaining pure Python and keeping the output correct. The gain is larger
+than for raytrace because part of the original cost was algorithmic, not only
+interpreter overhead. The interpreter loop still takes the largest share of the
+optimized run.
