@@ -17,6 +17,13 @@ module tb_ray_sphere;
 
     always #5 clk = ~clk;
 
+    // Watchdog: a lost handshake fails the run instead of hanging it.
+    initial begin
+        #10000;
+        $display("TEST FAILED: timeout waiting for out_valid");
+        $finish;
+    end
+
     initial begin
         clk       = 0;
         rst_n     = 0;
@@ -29,7 +36,8 @@ module tb_ray_sphere;
         // Test 1: Ray hitting sphere centered at (0, 0, 10) with Radius = 2
         // Ray from (0, 0, 0) pointing in +Z direction (0, 0, 1)
         // Expected hit at t = 10 - 2 = 8.0 (Q16.16 = 8 * 65536 = 524288)
-        @(posedge clk);
+        // Inputs are driven on negedge so they never race the DUT's posedge sampling.
+        @(negedge clk);
         cx     = 32'sd0;
         cy     = 32'sd0;
         cz     = 32'sd10 <<< 16;
@@ -42,11 +50,11 @@ module tb_ray_sphere;
         dz     = 32'sd1 <<< 16;
         in_valid = 1;
 
-        @(posedge clk);
+        @(negedge clk);
         in_valid = 0;
 
-        @(posedge out_valid);
-        #1;
+        // Sample out_valid as a settled level: a zero-width glitch must not count.
+        while (!out_valid) @(negedge clk);
         if (hit && (t_hit >= (8 <<< 16) - 100) && (t_hit <= (8 <<< 16) + 100)) begin
             $display("TEST 1 PASSED: Direct Hit at t = %0f", $itor(t_hit)/65536.0);
         end else begin
@@ -55,18 +63,18 @@ module tb_ray_sphere;
 
         // Test 2: Ray completely missing the sphere
         // Sphere at (10, 10, 10), Ray along +Z
-        @(posedge clk);
+        @(negedge clk);
         cx     = 32'sd10 <<< 16;
         cy     = 32'sd10 <<< 16;
         cz     = 32'sd10 <<< 16;
         radius = 32'sd2 <<< 16;
         in_valid = 1;
 
-        @(posedge clk);
+        @(negedge clk);
         in_valid = 0;
 
-        @(posedge out_valid);
-        #1;
+        // Sample out_valid as a settled level: a zero-width glitch must not count.
+        while (!out_valid) @(negedge clk);
         if (!hit) begin
             $display("TEST 2 PASSED: Correctly detected Miss");
         end else begin

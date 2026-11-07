@@ -121,8 +121,10 @@ module ray_sphere_intersect (
                 end
 
                 EMIT: begin
+                    // Hold out_valid until the result is actually transferred:
+                    // the handshake completes only when valid and ready are both high.
                     out_valid <= 1'b1;
-                    if (out_ready) begin
+                    if (out_valid && out_ready) begin
                         out_valid <= 1'b0;
                         state     <= IDLE;
                     end
