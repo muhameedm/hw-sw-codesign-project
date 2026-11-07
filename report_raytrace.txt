@@ -4,59 +4,187 @@ HW/SW Co-design Final Project (00460882) - Benchmark: raytrace
 
 1. OVERVIEW
 --------------------------------------------------------------------------------
-raytrace is a pure-Python raytracer benchmark executing 3D scene rendering via
-mathematical ray-geometry intersections, vector dot/cross products, and shading.
-It renders an image by casting primary and secondary rays across reflective surfaces
-and spherical objects.
+raytrace is a pure-Python ray tracer from pyperformance. It renders a 100x100
+scene containing 7 spheres and one checkerboard half-space, lit by two lights,
+with reflections.
+
+Libraries: math (sqrt) and pyperf (timing harness). No third-party numeric code.
+Data structures: small immutable-style objects (Vector, Point, Ray) created for
+almost every arithmetic step, plus Sphere, Halfspace, Scene, Canvas and surfaces.
+Algorithm: for each pixel, cast a ray, test it against every object, take the
+nearest hit, then shade it with shadow rays and recursive reflection rays.
 
 2. PROFILING & BOTTLENECK ANALYSIS
 --------------------------------------------------------------------------------
-Environment: QEMU guest on tangerine server, measured using:
-`perf record -F 999 -g -- python3 bm_raytrace/run_benchmark.py --values 1 -w 0`
+Environment: QEMU (TCG) guest on the tangerine server, Python 3.10.
+  perf record -F 999 -g -- python3 bm_raytrace/run_benchmark.py --values 1 -w 0
 
-Key Bottlenecks identified:
-- _PyEval_EvalFrameDefault (~35.6% self): CPython bytecode execution overhead.
-- Object Allocation Churn: Classes (Vector, Point, Ray, Sphere) lacked __slots__,
-  triggering dynamic dict (__dict__) allocation, deallocation, and cache misses.
-- Redundant Function Calls & Type Checks: mustBeVector() and isPoint() called
-  millions of times inside the inner math loop.
-- Inefficient Intersection Logic: Sphere.intersectionTime repeatedly built
-  intermediate Vector instances and executed method calls per ray-sphere pair.
+Data: initial_raytrace_report.txt, raytrace_orig.svg, raytrace_opt.svg.
+
+Native hotspots from perf (self time, original code):
+  _PyEval_EvalFrameDefault  35.6%   bytecode interpreter loop
+  _PyEval_MakeFrameVector    3.4%   Python call frames
+  _PyFunction_Vectorcall     2.9%   Python calls
+  insertdict                 2.8%   instance __dict__ writes
+  frame_dealloc              2.7%   frame teardown
+  _PyObject_GetMethod        2.6%   method lookup
+
+Limitation: perf sees CPython's C functions, not Python function names, and most
+stacks resolve to [unknown]. The flame graphs therefore show WHAT the interpreter
+spends time on. Mapping that to Python code below comes from reading the source.
+
+Bottlenecks:
+- Per-object __dict__ work (insertdict) from millions of short-lived objects.
+- Call overhead from many tiny methods (dot, scale, __sub__, mustBeVector).
+- Sphere.intersectionTime builds a temporary Vector for every ray-sphere pair.
 
 3. SOFTWARE OPTIMIZATION
 --------------------------------------------------------------------------------
-Optimizations applied (opt_raytrace/run_benchmark.py):
-- OPT-1 (__slots__ allocation elimination): Added __slots__ to Vector, Point,
-  and Ray classes, eliminating per-object dict overhead.
-- OPT-2 (Assertion Removal): Stripped redundant runtime type checks from hot
-  vector arithmetic (dot, __sub__, cross).
-- OPT-3 (Inlined Intersection Math): Inlined vector subtraction and dot products
-  directly inside Sphere.intersectionTime using local scalar floats.
+Applied in opt_raytrace/run_benchmark.py:
+- OPT-1: __slots__ on Vector, Point and Ray, removing the per-object __dict__.
+- OPT-2: removed the no-op mustBeVector() calls from dot, __sub__ and cross.
+- OPT-3: inlined the subtraction and dot products in Sphere.intersectionTime
+  using local floats, so no temporary Vector is created.
 
-Results (pyperf compare_to):
-  Mean +- std dev: [raytrace_orig] 17.5 sec +- 2.8 sec
-                -> [raytrace_opt]  11.6 sec +- 2.3 sec: 1.52x faster (~33.7% reduction)
+Correctness: original and optimized versions produced byte-identical output on a
+60x60 render of the benchmark scene.
 
-4. HARDWARE ACCELERATION PROPOSAL
+4. PERFORMANCE COMPARISON
 --------------------------------------------------------------------------------
-Component: Ray-Sphere Intersection Engine (hardware_raytrace/ray_sphere_intersect.sv)
-Accompanied by: Non-Restoring Q16.16 Square Root Unit (hardware_raytrace/q16_sqrt.sv)
+pyperf compare_to (raytrace_compare.txt), QEMU guest, 60 values each:
+  [raytrace_orig] 17.5 sec +- 2.8 sec
+  -> [raytrace_opt] 11.6 sec +- 2.3 sec: 1.52x faster (34.0% less time)
 
-- Datapath & Architecture:
-  Fully integer/fixed-point Q16.16 pipeline receiving sphere center (cx, cy, cz),
-  radius, ray origin (px, py, pz), and direction (dx, dy, dz).
-  Calculates cp = c - p, v = cp . d, cp_dot_cp = cp . cp, discriminant = r^2 - (cp.cp - v^2),
-  and distance t = v - sqrt(discriminant).
-- Verification:
-  Simulated via Icarus Verilog (`iverilog -g2012`), passed verification:
-  `TEST 1 PASSED: Direct Hit at t = 8.000000`, `TEST 2 PASSED: Correctly detected Miss`.
-- Hardware/Software Interface:
-  Memory-Mapped I/O (MMIO) with AXI-Stream valid/ready handshakes.
+perf samples: 436,132 -> 311,866 (28% fewer).
 
-Amdahl's Law Speedup Estimation:
-- Evaluated accelerated fraction f: Ray-sphere intersection and vector dot calculations
-  account for ~42.0% of execution time (f = 0.42).
-- Estimated component speedup: At 400 MHz in FPGA/ASIC, hardware evaluates an intersection
-  in ~28 clock cycles (~70 ns) vs ~12 us in Python interpreter (s ~ 170x).
-- Theoretical Overall System Speedup:
-  Speedup = 1 / ((1 - f) + f / s) = 1 / ((1 - 0.42) + 0.42 / 170) = 1.71x
+Hardware counters. The VM does not support them, so these were measured directly
+on the tangerine host (Intel Xeon E5-2690 v4, Python 3.10), pinned to one core:
+perf stat -r 5, 10 render loops per run (perf_stat/).
+
+  Counter            Original     Optimized    Change
+  Instructions       50.72 G      33.82 G      1.50x fewer
+  Cycles             18.67 G      12.47 G      1.50x fewer
+  IPC                2.72         2.71         same
+  Cache-miss rate    1.64%        1.71%        about the same
+  Branch-miss rate   0.27%        0.36%        higher
+
+IPC did not change, so the gain comes from executing fewer instructions.
+
+pyperf warned that these runs are unstable (std dev 16-20% of the mean) because
+of the emulated VM, but the gain is well above that noise and above the 7% goal.
+
+5. HARDWARE ACCELERATION PROPOSAL
+--------------------------------------------------------------------------------
+Component: ray-sphere intersection engine.
+Files: hardware_raytrace/ray_sphere_intersect.sv, q16_sqrt.sv, tb_ray_sphere.sv
+
+5.1 Function
+  cp = c - p;  v = cp . d;  disc = r^2 - (cp . cp - v^2)
+  hit = (disc >= 0);  t = v - sqrt(disc)
+This matches Sphere.intersectionTime. d must be a unit vector.
+
+5.2 Inputs and outputs (all data signed Q16.16, 32 bits)
+  clk, rst_n                 clock, asynchronous active-low reset
+  in_valid / in_ready        input handshake (1 bit each)
+  cx, cy, cz, radius         sphere centre and radius
+  px, py, pz                 ray origin
+  dx, dy, dz                 ray direction
+  out_valid / out_ready      output handshake (1 bit each)
+  hit                        1 bit
+  t_hit                      hit distance, 0 on a miss
+Target clock: 200 MHz. This is an assumption; the design was not synthesized.
+
+5.3 Architecture
+A multi-cycle FSM, not a pipeline: it accepts one request at a time.
+  IDLE       capture cp = c - p
+  CALC_DOT   v, cp.cp, r^2 at full 64-bit precision
+  CALC_DISC  scale to Q16.16, form disc, branch on its sign
+  SQRT_WAIT  run q16_sqrt
+  EMIT       hold the result until out_ready
+q16_sqrt is an iterative restoring digit-by-digit square root, producing one
+result bit per cycle over 24 cycles.
+
+Measured latency in simulation, from accepted input to out_valid:
+  hit: 30 cycles (150 ns at 200 MHz)    miss: 4 cycles (20 ns at 200 MHz)
+
+Numeric limits: intermediate squares are truncated to Q16.16, so cp.cp, v^2 and
+r^2 must stay below 32768 (distances below about 181). Results differ slightly
+from double precision; the effect on the rendered image was not evaluated.
+
+5.4 Block diagram
+
+   +------------------ CPU / Python ------------------+
+   |  Sphere.intersectionTime -> driver (float->Q16.16)|
+   +-----------------------+---------------------------+
+                           | MMIO registers / DMA batch
+                           v
+   +--------------- ray_sphere_intersect --------------+
+   |  in_valid/in_ready                                |
+   |        |                                          |
+   |        v                                          |
+   |  [ c - p ] -> [ v, cp.cp, r^2 ] -> [ disc, sign ] |
+   |                                       |      |    |
+   |                               disc>=0 |      | <0 |
+   |                                       v      |    |
+   |                                 [ q16_sqrt ] |    |
+   |                                       |      |    |
+   |                                       v      v    |
+   |  FSM control ---------------> [ t = v - sqrt ]    |
+   |                                       |           |
+   |  out_valid/out_ready, hit, t_hit <----+           |
+   +---------------------------------------------------+
+
+5.5 Hardware/software interface
+A driver exposes the block through memory-mapped registers: inputs are written,
+a start bit drives in_valid, and hit/t_hit are read when out_valid is set. The
+Python side needs a small C extension to reach the driver and to convert between
+float and Q16.16. A DMA descriptor list of ray-sphere pairs is the preferred mode
+(see 5.6).
+
+5.6 Acceleration justification and estimate
+Why this block: it is fixed arithmetic with no data-dependent memory access, and
+it is called 179,457 times per 100x100 render.
+
+Measured on a MacBook, Python 3.13 (not the QEMU guest; should be repeated there):
+                 total render   cost per call   share of runtime (f)
+  original       0.181 s        0.49 us         0.485
+  optimized      0.144 s        0.27 us         0.336
+
+Amdahl's law, S = 1 / ((1 - f) + f / s), against the optimized code:
+  Upper bound, s -> infinity:              1 / 0.664 = 1.51x
+  Compute only, s = 0.27 us / 0.15 us = 1.8:          1.18x
+
+These figures ignore transfer and conversion cost. That cost decides the outcome:
+a single MMIO round trip from Python is likely to take longer than the 0.27 us it
+replaces, so one call per intersection would probably be SLOWER than software.
+The accelerator only pays off when work is batched, for example all spheres for
+a block of rays through DMA, and a pipelined datapath would be needed to raise
+throughput above one result per 30 cycles.
+
+5.7 Performance / area / power trade-offs
+- Area: 8 multipliers of 32x32 (3 for v, 3 for cp.cp, 1 for r^2, 1 for v^2). One
+  shared multiplier would save area at the cost of about 6 extra cycles.
+- Frequency: three products and their sum in one cycle limit the clock. Splitting
+  CALC_DOT into stages allows a higher clock with more latency.
+- Throughput: pipelining the square root gives one result per cycle, at the cost
+  of about 24 stages of registers.
+- Precision: Q16.16 is far cheaper than floating point but limits range.
+- Power: fixed-point logic is low power, and misses skip the square root.
+
+5.8 Verification
+Icarus Verilog (iverilog -g2012), tb_ray_sphere.sv:
+  TEST 1 PASSED: Direct Hit at t = 8.000000
+  TEST 2 PASSED: Correctly detected Miss
+An earlier version cleared out_valid in the same cycle it was set, which produced
+a zero-width glitch that the old testbench accepted as a pass. The handshake was
+fixed and the testbench now samples out_valid as a settled level, drives inputs on
+negedge, and has a timeout. The old RTL fails this testbench.
+Not tested: out_ready held low (back-pressure), tangent rays, negative t.
+
+6. CONCLUSION
+--------------------------------------------------------------------------------
+Removing per-object dictionaries, no-op checks and temporary objects made raytrace
+1.52x faster with identical output. Most remaining time is interpreter overhead
+spread across the program. Ray-sphere intersection is a clean hardware target, but
+after the software optimization its share falls to about a third of runtime, which
+caps any accelerator at about 1.5x, and that gain needs batched transfers.
