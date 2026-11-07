@@ -1,0 +1,8 @@
+# started on Sat Nov  7 12:39:44 2026
+
+50722089446,,instructions,0.19%,5988144635,83.31,2.71,insn per cycle
+18666059488,,cycles,0.33%,5988124844,83.31,,
+6291589,,cache-references,7.28%,5990731552,83.34,,
+103356,,cache-misses,6.33%,5992934688,83.37,1.659,of all cache refs
+9766751315,,branches,0.20%,5992128260,83.36,,
+26103475,,branch-misses,1.48%,4788484572,66.62,0.27,of all branches
