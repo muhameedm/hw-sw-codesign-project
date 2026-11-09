@@ -34,8 +34,8 @@ def stats(name):
 def self_rows(report, n=None):
     rows = []
     for l in open(path(report), errors="ignore"):
-        m = re.match(r"\s+([\d.]+)%\s+([\d.]+)%\s+python3\S*\s+(\S+)\s+\[\.\]\s+(\S+)", l)
-        if m: rows.append((float(m[2]), m[4].split(".lto")[0]))
+        m = re.match(r"\s+([\d.]+)%\s+python3\S*\s+(\S+)\s+\[\.\]\s+(\S+)", l)
+        if m: rows.append((float(m[1]), m[3].split(".lto")[0]))
     rows.sort(reverse=True)
     return rows[:n] if n else rows
 
@@ -245,14 +245,14 @@ banner(s, 5.95, "Both benchmarks spend their time on work around the computation
 s = slide("Method: how every number was measured",
           "Timing and profiles ran in the course QEMU VM with Python 3.10. The VM uses software emulation, so runs are slow and noisy, and it does not support hardware counters. Those were measured separately on the tangerine host, also with Python 3.10.")
 code(s, .6, 1.4, 7.5, 2.85, "commands, run inside the VM", [
-    (0, "perf record -F 999 -g -- python3 run_benchmark.py \\"), (0, "    --values 1 -w 0"),
+    (0, "perf record -F 999 -g -- python3-dbg run_benchmark.py \\"), (0, "    --values 1 -w 0"),
     (0, "perf script | stackcollapse-perf.pl | flamegraph.pl"), (0, ""),
     (0, "python3 run_benchmark.py --values 3 -w 1 -o out.json"), (0, "python3 -m pyperf compare_to orig.json opt.json")], 13)
 card(s, 8.35, 1.4, 4.38, 2.85, "Two environments", ["Times and profiles: QEMU VM", "The VM has no hardware counters", "perf stat counters: tangerine host"], AMBERT, AMBER)
 table(s, .6, 4.5, 12.13, [2.4, 5.2, 4.53], [
     ["Tool", "What it gives us", "Limit"],
-    ["pyperf", "Mean and spread over 60 values", "VM spread reached 16-20% on raytrace"],
-    ["perf + FlameGraph", "Share of runtime per C function", "Python names are not visible"],
+    ["pyperf", "Mean and spread with python3", "VM spread reached 16-20% on raytrace"],
+    ["perf + FlameGraph", "Profiles with python3-dbg", "Debug build changes the percentages"],
     ["perf stat", "Instructions, cycles, IPC on the host", "Different machine from the VM timing"],
     ["Icarus Verilog", "Simulation of the RTL", "No synthesis, so timing is an assumption"]], 14, .42)
 
@@ -270,9 +270,9 @@ card(s, .6, 2.75, 3.9, 3.65, "Scene", ["100 x 100 pixels", "7 spheres and a chec
 card(s, 4.72, 2.75, 3.9, 3.65, "Data structures", ["Vector and Point: x, y, z", "Ray: point and vector", "Sphere, Halfspace, Scene, Canvas"], TINT, TEAL, 17, 20)
 card(s, 8.83, 2.75, 3.9, 3.65, "Libraries", ["math.sqrt", "pyperf for timing", "No numeric library: all arithmetic is Python objects"], TINT, TEAL, 17, 20)
 
-rows = self_rows("initial_raytrace_report.txt")
+rows = self_rows("raytrace_orig_perf_report.txt")
 top = rows[:8]
-meaning = {"_PyEval_EvalFrameDefault": ("Interpreter", TEAL), "_PyEval_MakeFrameVector": ("Calls and frames", AMBER), "_PyFunction_Vectorcall": ("Calls and frames", AMBER),
+meaning = {"_PyEval_EvalFrameDefault": ("Interpreter", TEAL), "_PyEval_MakeFrameVector": ("Calls and frames", AMBER), "call_function": ("Calls and frames", AMBER), "binary_op1": ("Arithmetic", GREY), "PyTuple_GetItem": ("Tuple access", GREY), "PyFloat_FromDouble": ("Float objects", GREY),
            "insertdict": ("Attributes and dicts", RED), "frame_dealloc": ("Calls and frames", AMBER), "_PyObject_GetMethod": ("Attributes and dicts", RED),
            "_PyObject_MakeTpCall": ("Calls and frames", AMBER), "_PyObject_GenericSetAttrWithDict": ("Attributes and dicts", RED)}
 s = slide("Profiling: where the self-time goes",
@@ -280,22 +280,22 @@ s = slide("Profiling: where the self-time goes",
 data = [["Self %", "Symbol", "Category"]] + [[f"{v:.2f}", n, meaning.get(n, ("Other", GREY))[0]] for v, n in top]
 cols = {(i + 1, 2): meaning.get(n, ("", GREY))[1] for i, (v, n) in enumerate(top)}
 table(s, .6, 1.4, 8.15, [1.0, 4.65, 2.5], data, 14, .47, align=[R_, L_, L_], colors=cols)
-text(s, .6, 5.75, 8.1, .3, "perf report --stdio, original code, 436,132 samples", 12, GREY)
+text(s, .6, 5.75, 8.1, .3, "perf report --stdio, python3-dbg, original code, 1,270,226 samples", 12, GREY)
 cat = {"Interpreter": 0, "Calls and frames": 0, "Attributes and dicts": 0}
 for v, n in rows:
-    k = ("Interpreter" if n == "_PyEval_EvalFrameDefault" else "Attributes and dicts" if re.search("dict|Dict|Attr|GetMethod", n) else "Calls and frames" if re.search("frame|Frame|Vectorcall|Call|tp_init", n) else None)
+    k = ("Interpreter" if n == "_PyEval_EvalFrameDefault" else "Attributes and dicts" if re.search("dict|Dict|Attr|GetMethod|Type_Lookup", n) else "Calls and frames" if re.search("frame|Frame|Vectorcall|Call|call_function|tp_init", n) else None)
     if k: cat[k] += v
 stat(s, 9.0, 1.4, 3.73, 1.35, f"{cat['Interpreter']:.1f}%", "Interpreter loop", TEAL, TEALT)
 stat(s, 9.0, 2.9, 3.73, 1.35, f"{cat['Calls and frames']:.1f}%", "Calls and frames, by symbol name", AMBER, AMBERT)
 stat(s, 9.0, 4.4, 3.73, 1.35, f"{cat['Attributes and dicts']:.1f}%", "Attributes and dicts, by symbol name", RED, REDT)
 
 s = slide("Profiling: flame graph of the original run",
-          "Bottom rows of raytrace_orig.svg. Width is the share of samples. The profile is flat apart from the interpreter loop. Many stacks are unknown because CPython frames are not unwound, so we read the code to map this to Python.")
+          "Bottom rows of raytrace_orig.svg. Width is the share of samples. The profile is flat apart from the interpreter loop. Many stacks still pass through unknown frames, and it shows CPython C functions only, so we read the code to map this to Python.")
 pic = s.shapes.add_picture("assets/raytrace_orig.png", I(.6), I(1.4), width=I(12.13))
 pic._element.nvPicPr.cNvPr.set("descr", "Bottom rows of the raytrace flame graph. The widest frame is _PyEval_EvalFrameDefault.")
 y = 1.4 + pic.height / 914400 + .3
 card(s, .6, y, 5.95, 6.8 - y, "How to read it", ["Width is share of samples, not time order", "No single wide function except the interpreter loop", "This points to many small costs"])
-card(s, 6.78, y, 5.95, 6.8 - y, "Limit of this profile", ["Most stacks resolve to [unknown]", "Only C functions are named", "The Python mapping comes from reading the source"], AMBERT, AMBER)
+card(s, 6.78, y, 5.95, 6.8 - y, "Limit of this profile", ["Many stacks still pass through [unknown]", "Python function names are not visible", "The Python mapping comes from reading the source"], AMBERT, AMBER)
 
 n1 = find_line(RT, "def __sub__"); n2 = find_line(RT, "def dot"); ni = find_line(RT, "def intersectionTime")
 s = slide("Bottlenecks: the code behind the hotspots",
@@ -331,9 +331,9 @@ text(s, .85, 2.8, 3.4, .3, f"original, ± {r_od:.1f} s", 14, GREY, A.CENTER)
 text(s, .85, 3.55, 3.4, .75, f"{r_p:.1f} s", 42, TEAL, A.CENTER, True)
 text(s, .85, 4.35, 3.4, .3, f"optimized, ± {r_pd:.1f} s", 14, GREY, A.CENTER)
 fn = [("_PyEval_MakeFrameVector", "Frame creation"), ("insertdict", "Dict writes"), ("frame_dealloc", "Frame cleanup"), ("_PyObject_GetMethod", "Method lookup")]
-tb = [["Measure", "Original", "Optimized", "Change"], ["Mean time", f"{r_o:.1f} s", f"{r_p:.1f} s", f"{r_red:.0f}% less"], ["perf samples", "436,132", "311,866", "28% fewer"]]
+tb = [["Measure", "Original", "Optimized", "Change"], ["Mean time", f"{r_o:.1f} s", f"{r_p:.1f} s", f"{r_red:.0f}% less"], ["perf samples", "1,270,226", "768,333", "40% fewer"]]
 for sym, lab in fn:
-    a, b = flame_pct("raytrace_orig.svg", sym), flame_pct("raytrace_opt.svg", sym)
+    a, b = dict(map(reversed, self_rows("raytrace_orig_perf_report.txt"))).get(sym, 0), dict(map(reversed, self_rows("raytrace_opt_perf_report.txt"))).get(sym, 0)
     tb.append([lab, f"{a:.2f}%", f"{b:.2f}%", "lower" if b < a else "higher" if b > a else "same"])
 table(s, 4.75, 1.45, 7.98, [3.0, 1.66, 1.66, 1.66], tb, 15, .57, align=[L_, R_, R_, L_], colors={(i, 3): TEAL for i in range(1, 7)})
 banner(s, 5.75, "Output stayed byte-identical, and the gain is far above the 7% target.")
@@ -342,8 +342,8 @@ counter_slide("raytrace", 10, "about the same", "Results: hardware counters for 
 
 s = slide("Results: flame graphs before and after",
           "Same shape, less work. The percentages are shares of a shorter run, so compare the shape and the sample counts, not raw widths.")
-text(s, .6, 1.4, 5.9, .35, [[("Before: ", {"bold": True}), "436,132 samples"]], 16)
-text(s, 6.83, 1.4, 5.9, .35, [[("After: ", {"bold": True}), "311,866 samples"]], 16)
+text(s, .6, 1.4, 5.9, .35, [[("Before: ", {"bold": True}), "1,270,226 samples"]], 16)
+text(s, 6.83, 1.4, 5.9, .35, [[("After: ", {"bold": True}), "768,333 samples"]], 16)
 for i, n in enumerate(("raytrace_orig", "raytrace_opt")):
     x = .6 + i * 6.23
     p = s.shapes.add_picture(f"assets/{n}.png", I(x), I(1.85), width=I(5.9))
@@ -359,7 +359,7 @@ s = slide("Hardware: why ray-sphere intersection",
 code(s, .6, 1.4, 5.95, 3.1, "the computation", [(0, "cp   = c - p"), (0, "v    = cp . d"), (0, "disc = r^2 - (cp.cp - v^2)"), (0, ""), (0, "!disc < 0 : miss"), (0, "!t = v - sqrt(disc)")], 16)
 card(s, 6.78, 1.4, 5.95, 3.1, "Worked example (Test 1)", ["Sphere at (0, 0, 10), r = 2", "Ray from origin along +z", "v = 10, cp.cp = 100, disc = 4", [("t = 10 - 2 = 8", {"bold": True, "color": RED})]], AMBERT, AMBER, 16)
 stat(s, .6, 4.75, 3.89, 1.75, "179,457", "calls per 100x100 render", TEAL, TEALT, 30)
-stat(s, 4.72, 4.75, 3.89, 1.75, "0.485 / 0.336", "share of runtime, original / optimized", TEAL, TINT, 30)
+stat(s, 4.72, 4.75, 3.89, 1.75, "0.50 / 0.285", "share of runtime, original / optimized", TEAL, TINT, 30)
 stat(s, 8.84, 4.75, 3.89, 1.75, "Q16.16", "32-bit signed fixed point", AMBER, AMBERT, 30)
 
 s = slide("Hardware: accelerator block diagram",
@@ -408,10 +408,10 @@ table(s, .6, 4.15, 12.13, [4.5, 3.8, 3.83], [["Testbench run", "Result", "Why"],
 text(s, .6, 6.1, 12.1, .5, "Not tested yet: out_ready held low, tangent rays, negative t.", 15, GREY)
 
 s = slide("Hardware: estimated benefit (Amdahl's law)",
-          "f and per-call cost were measured on a MacBook with Python 3.13, not the VM, so treat them as estimates. Against the optimized code the ceiling is 1.51x. With 0.27 microseconds in software and 150 nanoseconds in hardware, s is 1.8. A single MMIO round trip is likely longer than 0.27 microseconds, so calls must be batched. That last part is reasoning, not a measurement.")
+          "f and the per-call cost were measured on the tangerine host with Python 3.10, by replaying the real calls of one render. Against the optimized code the ceiling is 1.40x. With 0.74 microseconds in software and 150 nanoseconds in hardware at the 200 MHz target, s is 4.9, giving 1.29x before transfer costs. A device round trip from Python can take as long as the call it replaces, so batching is needed.")
 text(s, .6, 1.42, 6.2, .5, "S = 1 / ((1 - f) + f / s)", 26, TEAL, bold=True)
-table(s, .6, 2.1, 6.2, [2.6, 1.8, 1.8], [["Measured on Mac", "Original", "Optimized"], ["Render time", "0.181 s", "0.144 s"], ["Cost per call", "0.49 us", "0.27 us"], ["f", "0.485", "0.336"]], 14, .46, align=[L_, R_, R_])
-cd = CategoryChartData(); cd.categories = ["s = 1.8, compute only", "s = infinity, upper bound"]; cd.add_series("Speedup", (1.18, 1.51))
+table(s, .6, 2.1, 6.2, [2.6, 1.8, 1.8], [["tangerine, Python 3.10", "Original", "Optimized"], ["Render time", "0.710 s", "0.465 s"], ["Cost per call", "2.00 us", "0.74 us"], ["f", "0.50", "0.285"]], 14, .46, align=[L_, R_, R_])
+cd = CategoryChartData(); cd.categories = ["s = 4.9, compute only", "s = infinity, upper bound"]; cd.add_series("Speedup", (1.29, 1.40))
 g = s.shapes.add_chart(X.BAR_CLUSTERED, I(.6), I(4.1), I(6.2), I(2.3), cd); ch = g.chart
 ch.has_legend = False; ch.has_title = False; ch.font.size = Pt(13); ch.font.color.rgb = rgb(INK)
 pl = ch.plots[0]; pl.gap_width = 50; pl.has_data_labels = True; pl.data_labels.number_format = '0.00"x"'; pl.data_labels.number_format_is_linked = False; pl.data_labels.position = LP.OUTSIDE_END
@@ -421,7 +421,7 @@ for i, c in enumerate((TEAL, AMBER)):
     pt = pl.series[0].points[i]; pt.format.fill.solid(); pt.format.fill.fore_color.rgb = rgb(c)
 box(s, 7.05, 1.42, 5.68, 3.0, INK)
 text(s, 7.32, 1.62, 5.1, .4, "Transfers decide the outcome", 19, "F0B266", bold=True)
-text(s, 7.32, 2.2, 5.15, 2.1, ["The 1.18x excludes transfer and conversion", "One Python-to-device round trip likely costs more than the 0.27 us it replaces", "So one call per intersection would probably be slower"], 15, WHITE, bullets=True, after=7)
+text(s, 7.32, 2.2, 5.15, 2.1, ["The 1.29x excludes transfer and conversion", "A Python-to-device round trip can cost as much as the 0.74 us it replaces", "So calls must be sent in batches"], 15, WHITE, bullets=True, after=7)
 card(s, 7.05, 4.6, 5.68, 1.85, "What makes it pay off", ["Batch ray-sphere pairs over DMA", "Pipeline the datapath for throughput"], TEALT, TEAL, 15)
 
 s = slide("Hardware: performance, area and power trade-offs",
@@ -452,23 +452,23 @@ card(s, 8.83, 2.75, 3.9, 3.65, "Libraries", ["hashlib, struct, pyperf", "No comp
 
 s = slide("Profiling: where the self-time goes",
           "Self time from perf report on the original pyflate code.")
-cats = {"_PyEval_EvalFrameDefault": ("Interpreter", TEAL), "PyObject_RichCompare": ("Comparisons", RED), "list_dealloc": ("List churn", AMBER), "list_ass_slice": ("List churn", AMBER), "list_slice": ("List churn", AMBER), "_PyFunction_Vectorcall": ("Calls", GREY), "_PyObject_GetMethod": ("Calls", GREY), "binary_op1": ("Arithmetic", GREY), "object_dealloc": ("Objects", GREY)}
+cats = {"_PyEval_EvalFrameDefault": ("Interpreter", TEAL), "long_richcompare": ("Comparisons", RED), "__memset_sse2_unaligned_erms": ("Debug build", AMBER), "_PyMem_DebugCheckAddress": ("Debug build", AMBER), "_PyMem_DebugRawFree": ("Debug build", AMBER), "PyGILState_Check": ("Debug build", AMBER), "read_size_t": ("Debug build", AMBER), "_PyMem_DebugRawAlloc": ("Debug build", AMBER), "call_function": ("Calls", GREY), "PyTuple_GetItem": ("Tuple access", GREY), "list_dealloc": ("List churn", AMBER), "list_ass_slice": ("List churn", AMBER), "list_slice": ("List churn", AMBER), "_PyFunction_Vectorcall": ("Calls", GREY), "_PyObject_GetMethod": ("Calls", GREY), "binary_op1": ("Arithmetic", GREY), "object_dealloc": ("Objects", GREY)}
 r = self_rows("pyflate_orig_perf_report.txt", 8)
 table(s, .6, 1.4, 8.15, [1.0, 4.65, 2.5], [["Self %", "Symbol", "Category"]] + [[f"{v:.2f}", n, cats.get(n, ("Other", GREY))[0]] for v, n in r], 14, .47, align=[R_, L_, L_], colors={(i + 1, 2): cats.get(n, ("", GREY))[1] for i, (v, n) in enumerate(r)})
-text(s, .6, 5.75, 8.1, .3, "perf report --stdio, original code, 482,545 samples", 12, GREY)
-card(s, 9.0, 1.4, 3.73, 4.25, "What stands out", ["Interpreter loop leads at 39.6%", "Comparisons match the Huffman scan", "List slice and free match move_to_front"], TINT, TEAL)
+text(s, .6, 5.75, 8.1, .3, "perf report --stdio, python3-dbg, original code, 1,380,705 samples", 12, GREY)
+card(s, 9.0, 1.4, 3.73, 4.25, "What stands out", ["Interpreter loop: 21.1%", "Debug-build allocator costs are large", "List frees fall from 1.47% to 0.19% after the fix"], TINT, TEAL)
 
 s = slide("Profiling: flame graphs before and after",
-          "Bottom rows of the pyflate flame graphs. Samples fall by 62 percent. RichCompare and list slicing shrink, which matches removing the scan and the list rebuild. In the optimized run re and memory-copy functions appear, as expected.")
+          "Bottom rows of the pyflate flame graphs. Samples fall by 61 percent. List slicing and list frees shrink, which matches removing the scan and the list rebuild. In the optimized run re and memory-copy functions appear, as expected.")
 if PF_SVG:
     for i, n in enumerate(("pyflate_orig", "pyflate_opt")):
         x = .6 + i * 6.23
-        text(s, x, 1.4, 5.9, .35, [[("Before: " if i == 0 else "After: ", {"bold": True}), "482,545 samples" if i == 0 else "184,547 samples"]], 16)
+        text(s, x, 1.4, 5.9, .35, [[("Before: " if i == 0 else "After: ", {"bold": True}), "1,380,705 samples" if i == 0 else "539,715 samples"]], 16)
         p = s.shapes.add_picture(f"assets/{n}.png", I(x), I(1.85), width=I(5.9))
         p._element.nvPicPr.cNvPr.set("descr", f"Bottom rows of the {n} flame graph")
         y0 = 1.85 + p.height / 914400 + .3
         sv = n + ".svg"
-        table(s, x, y0, 5.9, [1.2, 4.7], [["Share", "Frame"]] + [[f"{flame_pct(sv, a):.2f}%", a] for a in ("_PyEval_EvalFrameDefault", "PyObject_RichCompare", "list_ass_slice")], 14, .44, align=[R_, L_])
+        table(s, x, y0, 5.9, [1.2, 4.7], [["Share", "Frame"]] + [[f"{flame_pct(sv, a):.2f}%", a] for a in ("_PyEval_EvalFrameDefault", "list_dealloc", "list_ass_slice")], 14, .44, align=[R_, L_])
 else:
     pending(s, .6, 1.4, 12.13, 5.3)
 
@@ -517,7 +517,7 @@ text(s, .85, 2.0, 3.4, .75, f"{PF['o']:.1f} s" if PF else "pending", 42, INK, A.
 text(s, .85, 2.8, 3.4, .3, f"original, ± {PF['od']:.1f} s" if PF else "original", 14, GREY, A.CENTER)
 text(s, .85, 3.55, 3.4, .75, f"{PF['p']:.1f} s" if PF else "pending", 42, TEAL, A.CENTER, True)
 text(s, .85, 4.35, 3.4, .3, f"optimized, ± {PF['pd']:.1f} s" if PF else "optimized", 14, GREY, A.CENTER)
-table(s, 4.75, 1.45, 7.98, [3.8, 4.18], [["Check", "Result"], ["Speedup", pf_speed], ["Runtime reduction", f"{PF['red']:.0f}%" if PF else "pending"], ["perf samples", "482,545 to 184,547"], ["Target", "At least 7%"], ["MD5 of the output", "Passes on every run"], ["bz2 cross-check", "14 of 14 inputs match"]], 15, .57, colors={(1, 1): TEAL, (2, 1): TEAL})
+table(s, 4.75, 1.45, 7.98, [3.8, 4.18], [["Check", "Result"], ["Speedup", pf_speed], ["Runtime reduction", f"{PF['red']:.0f}%" if PF else "pending"], ["perf samples, python3-dbg", "1,380,705 to 539,715"], ["Target", "At least 7%"], ["MD5 of the output", "Passes on every run"], ["bz2 cross-check", "14 of 14 inputs match"]], 15, .57, colors={(1, 1): TEAL, (2, 1): TEAL})
 banner(s, 5.75, "An algorithmic change gives more room than removing interpreter overhead alone.")
 
 counter_slide("pyflate", 3, "lower, noisy", "Results: hardware counters for pyflate")
@@ -525,13 +525,13 @@ counter_slide("pyflate", 3, "lower, noisy", "Results: hardware counters for pyfl
 # ---------------------------------------------------------------- end
 PART[0] = ""
 s = slide("Conclusions", "Close with the three lessons and the open limits, then take questions.", True)
-for i, (t, d) in enumerate([("Measure first", "Profiles showed where the extra work was, and reading the code linked it to Python."), ("Software first", f"Removing work gave {r_speed:.2f}x on raytrace and {pf_speed} on pyflate, with no new hardware."), ("Transfers decide", "An accelerator needs batching: the upper bound is 1.51x after optimization.")]):
+for i, (t, d) in enumerate([("Measure first", "Profiles showed where the extra work was, and reading the code linked it to Python."), ("Software first", f"Removing work gave {r_speed:.2f}x on raytrace and {pf_speed} on pyflate, with no new hardware."), ("Transfers decide", "An accelerator needs batching: the upper bound is 1.40x after optimization.")]):
     x = .6 + i * 4.12
     box(s, x, 1.45, 3.89, 2.45, "293243")
     text(s, x + .25, 1.68, 3.4, .45, t, 22, "F0B266", bold=True)
     text(s, x + .25, 2.3, 3.4, 1.4, d, 16, WHITE)
 text(s, .6, 4.25, 6, .4, "Open limits", 20, WHITE, bold=True)
-text(s, .6, 4.8, 6.2, 1.5, ["f was measured on a Mac, not the VM", "200 MHz is assumed: no synthesis", "Back-pressure is not tested"], 16, "C9D0DA", bullets=True)
+text(s, .6, 4.8, 6.2, 1.5, ["200 MHz is a design target: no synthesis", "Back-pressure is not tested", "Transfer costs are not measured"], 16, "C9D0DA", bullets=True)
 text(s, 7.2, 4.25, 5.5, .4, "Repository", 20, WHITE, bold=True)
 text(s, 7.2, 4.8, 5.5, .8, "github.com/muhameedm/hw-sw-codesign-project", 16, "C9D0DA")
 text(s, 7.2, 5.55, 5.5, .6, "Thank you. Questions?", 26, "F0B266", bold=True)
