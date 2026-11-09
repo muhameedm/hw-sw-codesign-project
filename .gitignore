@@ -4,3 +4,4 @@ __pycache__/
 hardware_raytrace/sim_ray_sphere
 results/
 venv/
+~$*
