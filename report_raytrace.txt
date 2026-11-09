@@ -17,20 +17,27 @@ nearest hit, then shade it with shadow rays and recursive reflection rays.
 2. PROFILING & BOTTLENECK ANALYSIS
 --------------------------------------------------------------------------------
 Environment: QEMU (TCG) guest on the tangerine server, Python 3.10.
-  perf record -F 999 -g -- python3 bm_raytrace/run_benchmark.py --values 1 -w 0
+Timing uses the normal python3. Profiling uses the debug build, as the course guide
+requires, because it exposes more CPython symbols:
+  perf record -F 999 -g -- python3-dbg bm_raytrace/run_benchmark.py --values 1 -w 0
 
-Data: initial_raytrace_report.txt, raytrace_orig.svg, raytrace_opt.svg.
+Data: raytrace_orig_perf_report.txt, raytrace_opt_perf_report.txt, raytrace_orig.svg,
+raytrace_opt.svg. initial_raytrace_report.txt is an earlier non-debug profile.
 
-Native hotspots from perf (self time, original code):
-  _PyEval_EvalFrameDefault  35.6%   bytecode interpreter loop
-  _PyEval_MakeFrameVector    3.4%   Python call frames
-  _PyFunction_Vectorcall     2.9%   Python calls
-  insertdict                 2.8%   instance __dict__ writes
-  frame_dealloc              2.7%   frame teardown
-  _PyObject_GetMethod        2.6%   method lookup
+Native hotspots from perf (self time, original code, python3-dbg):
+  _PyEval_EvalFrameDefault  20.83%   bytecode interpreter loop
+  _PyEval_MakeFrameVector    2.80%   Python call frames
+  frame_dealloc              2.31%   frame teardown
+  binary_op1                 1.98%   generic arithmetic
+  PyTuple_GetItem            1.95%   tuple access
+  _PyObject_GetMethod        1.90%   method lookup
+  call_function              1.71%   Python calls
+  PyFloat_FromDouble         1.68%   float object creation
 
-Limitation: perf sees CPython's C functions, not Python function names, and most
-stacks resolve to [unknown]. The flame graphs therefore show WHAT the interpreter
+The debug build adds checks, so these shares differ from a normal build.
+
+Limitation: perf sees CPython's C functions, not Python function names, and many
+stacks still pass through [unknown] frames. The flame graphs therefore show WHAT the interpreter
 spends time on. Mapping that to Python code below comes from reading the source.
 
 Bottlenecks:
@@ -55,7 +62,8 @@ pyperf compare_to (raytrace_compare.txt), QEMU guest, 60 values each:
   [raytrace_orig] 17.5 sec +- 2.8 sec
   -> [raytrace_opt] 11.6 sec +- 2.3 sec: 1.52x faster (34.0% less time)
 
-perf samples: 436,132 -> 311,866 (28% fewer).
+perf samples with python3-dbg: 1,270,226 -> 768,333 (40% fewer).
+insertdict: 1.17% -> 0.15%; dict_dealloc: 0.89% -> 0.03%.
 
 Hardware counters. The VM does not support them, so these were measured directly
 on the tangerine host (Intel Xeon E5-2690 v4, Python 3.10), pinned to one core:
@@ -145,17 +153,21 @@ float and Q16.16. A DMA descriptor list of ray-sphere pairs is the preferred mod
 Why this block: it is fixed arithmetic with no data-dependent memory access, and
 it is called 179,457 times per 100x100 render.
 
-Measured on a MacBook, Python 3.13 (not the QEMU guest; should be repeated there):
+Measured directly on the tangerine host with Python 3.10, pinned to one core, by
+replaying the real calls of one render (perf_stat/measure_f.py). The host is used
+because the emulated VM would inflate the software cost per call.
                  total render   cost per call   share of runtime (f)
-  original       0.181 s        0.49 us         0.485
-  optimized      0.144 s        0.27 us         0.336
+  original       0.710 s        2.00 us         0.50
+  optimized      0.465 s        0.74 us         0.285
 
 Amdahl's law, S = 1 / ((1 - f) + f / s), against the optimized code:
-  Upper bound, s -> infinity:              1 / 0.664 = 1.51x
-  Compute only, s = 0.27 us / 0.15 us = 1.8:          1.18x
+  Upper bound, s -> infinity:              1 / 0.715 = 1.40x
+  Compute only, s = 0.74 us / 0.15 us = 4.9:          1.29x
+
+The 0.15 us hardware time is the simulated 30-cycle latency at the 200 MHz target.
 
 These figures ignore transfer and conversion cost. That cost decides the outcome:
-a single MMIO round trip from Python is likely to take longer than the 0.27 us it
+a single MMIO round trip from Python is likely to take longer than the 0.74 us it
 replaces, so one call per intersection would probably be SLOWER than software.
 The accelerator only pays off when work is batched, for example all spheres for
 a block of rays through DMA, and a pipelined datapath would be needed to raise
@@ -187,4 +199,4 @@ Removing per-object dictionaries, no-op checks and temporary objects made raytra
 1.52x faster with identical output. Most remaining time is interpreter overhead
 spread across the program. Ray-sphere intersection is a clean hardware target, but
 after the software optimization its share falls to about a third of runtime, which
-caps any accelerator at about 1.5x, and that gain needs batched transfers.
+caps any accelerator at about 1.4x, and that gain needs batched transfers.
