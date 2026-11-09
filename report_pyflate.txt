@@ -18,18 +18,23 @@ Burrows-Wheeler transform, then a final run-length step.
 2. PROFILING & BOTTLENECK ANALYSIS
 --------------------------------------------------------------------------------
 Environment: QEMU (TCG) guest on the tangerine server, Python 3.10.
-Data: pyflate_orig_perf_report.txt, pyflate_orig.svg, pyflate_opt.svg.
+Timing uses the normal python3. Profiling uses python3-dbg, as the course guide
+requires.
+Data: pyflate_orig_perf_report.txt, pyflate_opt_perf_report.txt, pyflate_orig.svg,
+pyflate_opt.svg.
 
-Native hotspots from perf (self time, original code):
-  _PyEval_EvalFrameDefault  39.60%   bytecode interpreter loop
-  PyObject_RichCompare       2.82%   comparisons
-  _PyFunction_Vectorcall     2.23%   Python calls
-  binary_op1                 2.17%   generic arithmetic
-  list_dealloc               2.16%   freeing lists
-  object_dealloc             2.12%   freeing objects
-  _PyObject_GetMethod        2.06%   method lookup
-  list_ass_slice             1.92%   list slice assignment
-  list_slice                 1.76%   list slicing
+Native hotspots from perf (self time, original code, python3-dbg):
+  _PyEval_EvalFrameDefault      21.08%   bytecode interpreter loop
+  __memset_sse2_unaligned_erms   3.35%   memory fill (debug allocator)
+  _PyMem_DebugCheckAddress       2.58%   debug allocator check
+  _PyMem_DebugRawFree            2.14%   debug allocator
+  PyTuple_GetItem                1.59%   tuple access
+  list_dealloc                   1.47%   freeing lists
+  call_function                  1.31%   Python calls
+  long_richcompare               1.13%   integer comparisons
+
+The debug allocator is part of the debug build, so it does not reflect normal
+memory cost.
 
 Limitation: perf shows CPython's C functions, not Python names. The mapping below
 comes from reading the source.
@@ -65,7 +70,8 @@ pyperf compare_to (pyflate_compare.txt), QEMU guest, 60 values each:
   [pyflate_orig] 18.5 sec +- 1.6 sec
   -> [pyflate_opt] 5.56 sec +- 1.20 sec: 3.32x faster (69.9% less time)
 
-perf samples: 482,545 -> 184,547 (62% fewer).
+perf samples with python3-dbg: 1,380,705 -> 539,715 (61% fewer).
+list_dealloc: 1.47% -> 0.19%; list_ass_slice: 0.93% -> 0.31%; list_slice: 0.55% -> 0%.
 
 Hardware counters. The VM does not support them, so these were measured directly
 on the tangerine host (Intel Xeon E5-2690 v4, Python 3.10), pinned to one core:

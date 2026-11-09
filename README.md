@@ -33,7 +33,7 @@ available in the VM, so `perf_stat/` holds counters measured directly on the hos
 ## Requirements
 
 - The course QEMU VM (Ubuntu 22.04, Python 3.10)
-- `perf` and `pyperf`
+- `perf`, `pyperf`, and `python3-dbg` for profiling
 - [FlameGraph](https://github.com/brendangregg/FlameGraph), expected in
   `/root/FlameGraph` or set through `FLAMEGRAPH_DIR`
 - Icarus Verilog, for the hardware simulation

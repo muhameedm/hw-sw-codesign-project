@@ -14,7 +14,7 @@ command -v perf >/dev/null || { echo "perf is required"; exit 1; }
 [ -d "$FLAMEGRAPH_DIR" ] || git clone https://github.com/brendangregg/FlameGraph "$FLAMEGRAPH_DIR"
 
 flamegraph() {  # name, benchmark path
-    perf record -F 999 -g -o "$RESULTS/$1.perf" -- python3 "$2" --values 1 -w 0
+    perf record -F 999 -g -o "$RESULTS/$1.perf" -- python3-dbg "$2" --values 1 -w 0
     perf report --stdio -i "$RESULTS/$1.perf" > "$RESULTS/$1_perf_report.txt"
     perf script -i "$RESULTS/$1.perf" \
         | "$FLAMEGRAPH_DIR/stackcollapse-perf.pl" \
