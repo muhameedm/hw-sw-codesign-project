@@ -299,18 +299,12 @@ card(s, 6.78, y, 5.95, 6.8 - y, "Limit of this profile", ["Many stacks still pas
 
 n1 = find_line(RT, "def __sub__"); n2 = find_line(RT, "def dot"); ni = find_line(RT, "def intersectionTime")
 s = slide("Bottlenecks: the code behind the hotspots",
-          "Three sources of work. Each operation creates a Vector with a dictionary. mustBeVector just returns self, so it is a pure call cost. intersectionTime runs for every ray-sphere pair and builds a temporary.")
+          "Three sources of work. Each operation creates a Vector with a dictionary. mustBeVector just returns self, so it is a pure call cost. intersectionTime runs for every ray-sphere pair and builds a temporary. The conclusion: the arithmetic is cheap, and the cost is the Python objects around it.")
 code(s, .6, 1.4, 6.0, 2.5, f"{RT} · Vector", [(22, "class Vector(object):"), (24, "    def __init__(self, initx, inity, initz):"), (25, "!        self.x = initx   # __dict__ write"), (26, "!        self.y = inity"), (27, "!        self.z = initz")], 13, "dict per object")
 hot = src(RT, n2, n2 + 2)
 code(s, 6.73, 1.4, 6.0, 2.5, f"{RT} · dot", [(hot[0][0], hot[0][1]), (hot[1][0], "!" + hot[1][1]), (hot[2][0], hot[2][1].replace("(self.x * other.x) + (self.y * other.y) + (self.z * other.z)", "self.x*other.x + ...")), (find_line(RT, "def mustBeVector"), "    def mustBeVector(self):"), (find_line(RT, "def mustBeVector") + 1, "!        return self")], 13, "no-op call")
 L = src(RT, ni, ni + 6)
 code(s, .6, 4.05, 12.13, 2.75, f"{RT} · Sphere.intersectionTime", [(a, ("!" + b) if i in (1, 2, 3) else b) for i, (a, b) in enumerate(L)], 13, "179,457 calls per render")
-
-s = slide("Bottlenecks: root cause",
-          "The cost comes from how the Python code is structured. Each small step pays the object and call cost. The fix is to remove steps, not to speed up the math.")
-card(s, .6, 1.45, 5.95, 3.9, "1 · Object cost", ["Vector, Point and Ray objects are created constantly", "Each object carries a __dict__", "Shows up as insertdict, dict_dealloc, attribute writes"], TINT, RED, 18, 22)
-card(s, 6.78, 1.45, 5.95, 3.9, "2 · Call cost", ["Tiny methods: dot, scale, __sub__", "mustBeVector() does nothing but costs a call", "Shows up as frame creation and method lookup"], TINT, AMBER, 18, 22)
-banner(s, 5.65, "The arithmetic is cheap. Getting to the arithmetic through Python objects is what costs time.")
 
 s = slide("Optimization: three targeted changes",
           "Each change maps to a cost from the profile. Output stayed byte-identical on a 60 by 60 render of the benchmark scene.")
