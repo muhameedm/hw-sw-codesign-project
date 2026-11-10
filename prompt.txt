@@ -1,15 +1,19 @@
 HW/SW Co-Design (00460882) - AI Interaction Log
 Benchmarks: raytrace & pyflate
+Summary of the tasks we used AI tools for, by project phase.
 
 Phase 1: Profiling and Bottleneck Identification
-- Used perf record and flame graphs to analyze CPython bytecode overhead and memory allocation patterns.
+- Used perf record with python3-dbg and flame graphs to analyze CPython interpreter overhead and memory allocation patterns.
 - Identified object churn in raytrace (missing __slots__) and the linear Huffman search in pyflate.
 
 Phase 2: Software Optimization
-- Designed and applied __slots__ and inlined scalar operations to eliminate dynamic dictionaries.
+- raytrace: applied __slots__, removed no-op type checks from hot methods, and inlined the ray-sphere math.
+- pyflate: replaced the linear Huffman search with a lookup table, refilled the bit buffer 8 bytes at a time, and sped up move-to-front and the final RLE.
 - Validated performance improvement using pyperf compare_to (1.52x for raytrace, 3.32x for pyflate).
+- Measured hardware counters with perf stat on the tangerine host, since the VM has none.
 
 Phase 3: Hardware Acceleration & Architecture
 - Formulated fixed-point Q16.16 ray-sphere intersection datapath with an iterative restoring square root.
 - Implemented and simulated SystemVerilog models (q16_sqrt.sv, ray_sphere_intersect.sv, tb_ray_sphere.sv).
-- Computed theoretical system speedup bounds using Amdahl's Law.
+- Fixed an output handshake bug in ray_sphere_intersect.sv that the testbench exposed.
+- Estimated the system speedup with Amdahl's Law: 1.29x for the design, 1.40x upper bound.
