@@ -406,9 +406,7 @@ table(s, .6, 1.45, 12.13, [2.2, 4.75, 5.18], [
     ["Area", "8 multipliers of 32x32", "One shared multiplier: smaller, about 6 extra cycles"],
     ["Frequency", "Three products summed in one cycle", "More stages: higher clock, longer latency"],
     ["Throughput", "One result per 30 cycles", "Pipelined root: one per cycle, about 24 register stages"],
-    ["Precision", "Q16.16, squares below 32768", "Floating point: more range, much more logic"],
-    ["Power", "Fixed point, misses skip the root", "More parallel lanes raise power and throughput"],
-    ["Integration", "MMIO or DMA, C extension", "Tighter CPU coupling lowers call cost, harder to build"]], 14, .62)
+    ["Power", "Fixed point, misses skip the root", "More parallel lanes raise power and throughput"],], 14, .62)
 banner(s, 6.0, "The largest open choice is batching and pipelining, because transfer cost sets the real speedup.", .66)
 
 # ---------------------------------------------------------------- Part B
