@@ -380,19 +380,7 @@ arrow(s, 10.3, 3.8, .44, .24, GREY, S.LEFT_ARROW)
 tag(s, 4.82, 3.45, 2.5, .95, ["t = v - sqrt(disc)", ("output register", {"size": 12, "bold": False})], WHITE, INK, 14, line=TEAL)
 arrow(s, 7.37, 3.8, .44, .24, GREY, S.LEFT_ARROW)
 tag(s, 4.82, 4.75, 7.66, .72, ["Control FSM: IDLE, CALC_DOT, CALC_DISC, SQRT_WAIT, EMIT"], INK, WHITE, 15)
-text(s, 4.82, 5.65, 7.66, .9, [[("disc < 0: ", {"bold": True, "color": RED}), "skip q16_sqrt and go straight to EMIT with hit = 0."], "valid/ready handshake on both the input and output sides."], 14)
-
-s = slide("Hardware: interface and FSM latency",
-          "All data is signed Q16.16. Latency is measured in simulation: 30 cycles for a hit and 4 for a miss. The 200 MHz clock is an assumption since we did not synthesize.")
-table(s, .6, 1.4, 6.3, [2.55, .9, 2.85], [
-    ["Signal", "Bits", "Meaning"], ["cx, cy, cz, radius", "32 each", "Sphere, Q16.16"], ["px, py, pz", "32 each", "Ray origin"], ["dx, dy, dz", "32 each", "Unit direction"],
-    ["in_valid / in_ready", "1 each", "Input handshake"], ["out_valid / out_ready", "1 each", "Output handshake"], ["hit", "1", "Sphere was hit"], ["t_hit", "32", "Distance, 0 on miss"]], 13, .45, align=[L_, C, L_])
-table(s, 7.15, 1.4, 5.58, [1.95, 2.55, 1.08], [
-    ["State", "Work", "Cycles"], ["IDLE", "Capture cp = c - p", "1"], ["CALC_DOT", "v, cp.cp, r^2", "1"], ["CALC_DISC", "Scale, disc, sign", "1"],
-    ["SQRT_WAIT", "24 root bits + handoff", "26"], ["EMIT", "Hold until ready", "1"]], 13, .45, align=[L_, L_, C])
-stat(s, 7.15, 4.3, 2.68, 1.0, "30", "cycles, hit", AMBER, AMBERT, 26)
-stat(s, 10.05, 4.3, 2.68, 1.0, "4", "cycles, miss", AMBER, AMBERT, 26)
-banner(s, 5.55, "At an assumed 200 MHz: 150 ns per hit, 20 ns per miss. One request at a time, not a pipeline.", .75)
+text(s, 4.82, 5.65, 7.66, .9, [[("disc < 0: ", {"bold": True, "color": RED}), "skip q16_sqrt and go straight to EMIT with hit = 0."], "valid/ready handshake on both the input and output sides.", "All inputs are 32-bit Q16.16. Hit: 30 cycles, miss: 4 cycles. Assumed clock: 200 MHz."], 14)
 
 s = slide("Hardware: estimated benefit (Amdahl's law)",
           "f and the per-call cost were measured on the tangerine host with Python 3.10, by replaying the real calls of one render. Against the optimized code the ceiling is 1.40x. With 0.74 microseconds in software and 150 nanoseconds in hardware at the 200 MHz target, s is 4.9, giving 1.29x before transfer costs. A device round trip from Python can take as long as the call it replaces, so batching is needed.")
