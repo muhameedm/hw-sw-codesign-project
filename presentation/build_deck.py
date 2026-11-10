@@ -399,7 +399,6 @@ s = slide("Hardware: verification found a real bug",
 code(s, .6, 1.4, 5.95, 2.5, "ray_sphere_intersect.sv · before", [(0, "EMIT: begin"), (0, "    out_valid <= 1'b1;"), (0, "!    if (out_ready) begin"), (0, "!        out_valid <= 1'b0;  // wins")], 14, "same cycle")
 code(s, 6.78, 1.4, 5.95, 2.5, "ray_sphere_intersect.sv · after", [(0, "EMIT: begin"), (0, "    out_valid <= 1'b1;"), (0, "!    if (out_valid && out_ready) begin"), (0, "        out_valid <= 1'b0;")], 14, "hold until transfer")
 table(s, .6, 4.15, 12.13, [4.5, 3.8, 3.83], [["Testbench run", "Result", "Why"], ["Old testbench, old RTL", "PASS", "@(posedge out_valid) saw a glitch"], ["New testbench, old RTL", "FAIL, timeout", "out_valid never settles high"], ["New testbench, fixed RTL", "PASS: t = 8.0, miss detected", "Real handshake"]], 14, .45, colors={(1, 1): AMBER, (2, 1): RED, (3, 1): TEAL})
-text(s, .6, 6.1, 12.1, .5, "Not tested yet: out_ready held low, tangent rays, negative t.", 15, GREY)
 
 s = slide("Hardware: estimated benefit (Amdahl's law)",
           "f and the per-call cost were measured on the tangerine host with Python 3.10, by replaying the real calls of one render. Against the optimized code the ceiling is 1.40x. With 0.74 microseconds in software and 150 nanoseconds in hardware at the 200 MHz target, s is 4.9, giving 1.29x before transfer costs. A device round trip from Python can take as long as the call it replaces, so batching is needed.")
